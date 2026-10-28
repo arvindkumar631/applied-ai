@@ -1,0 +1,2207 @@
+openapi: 3.0.3
+
+info:
+  title: E-Bookstore API
+  description: |
+    Production-ready E-Commerce Bookstore backend built with Spring Boot 3 / Java 21.
+
+    ## Authentication
+    All protected endpoints require a **Bearer JWT** token obtained via `/v1/auth/login` or `/v1/auth/register`.
+    Pass the token in the `Authorization` header as: `Bearer <token>`.
+
+    ## Error Format
+    All errors return a consistent `ErrorResponse` body with `status`, `error`, `message`, `path`, `timestamp`,
+    and an optional `fieldErrors` map for validation failures (HTTP 400).
+
+    ## Pagination
+    Paginated endpoints accept `page` (0-based), `size`, and `sort` query parameters.
+  version: 1.0.0
+  contact:
+    name: E-Bookstore Team
+    email: dev@ebookstore.com
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8080/api
+    description: Local development server
+  - url: https://api.ebookstore.com
+    description: Production server
+
+# ─────────────────────────────────────────────
+# Security Schemes
+# ─────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token obtained from /v1/auth/login
+
+  # ─────────────────────────────────────────────
+  # Reusable Parameters
+  # ─────────────────────────────────────────────
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: Zero-based page index
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    SizeParam:
+      name: size
+      in: query
+      description: Number of items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    SortParam:
+      name: sort
+      in: query
+      description: "Sort field and direction, e.g. `title,asc` or `price,desc`"
+      schema:
+        type: string
+        example: title,asc
+    BookIdParam:
+      name: bookId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OrderIdParam:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CategoryIdParam:
+      name: categoryId
+      in: path
+      required: true
+      schema:
+        type: integer
+    BrandIdParam:
+      name: brandId
+      in: path
+      required: true
+      schema:
+        type: integer
+    AddressIdParam:
+      name: addressId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CartItemIdParam:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  # ─────────────────────────────────────────────
+  # Reusable Responses
+  # ─────────────────────────────────────────────
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 401
+            error: Unauthorized
+            message: JWT token is missing or invalid
+            path: /api/v1/books
+            timestamp: "2024-01-15T10:30:00"
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Request body validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 400
+            error: Validation Failed
+            message: Request body validation failed
+            path: /api/v1/auth/register
+            timestamp: "2024-01-15T10:30:00"
+            fieldErrors:
+              email: must be a valid email address
+              password: must contain at least one uppercase letter
+    UnprocessableEntity:
+      description: Business rule violation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalServerError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  # ─────────────────────────────────────────────
+  # Schemas
+  # ─────────────────────────────────────────────
+  schemas:
+
+    # ── Error ──────────────────────────────────
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: Bad Request
+        message:
+          type: string
+          example: Validation failed
+        path:
+          type: string
+          example: /api/v1/auth/register
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00"
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            email: must be a valid email address
+
+    # ── Auth ───────────────────────────────────
+    RegisterRequest:
+      type: object
+      required: [firstName, lastName, email, password]
+      properties:
+        firstName:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: John
+        lastName:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: Doe
+        email:
+          type: string
+          format: email
+          example: john.doe@example.com
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+          pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
+          example: Secur3@Pass
+          description: Must contain uppercase, lowercase, digit, and special character
+        phone:
+          type: string
+          pattern: '^\+?[1-9]\d{1,14}$'
+          example: "+5511999999999"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: john.doe@example.com
+        password:
+          type: string
+          example: Secur3@Pass
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refresh_token:
+          type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Expiry in seconds
+          example: 86400
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          example: john.doe@example.com
+        full_name:
+          type: string
+          example: John Doe
+        roles:
+          type: array
+          items:
+            type: string
+          example: [ROLE_CUSTOMER]
+
+    # ── User / Address ──────────────────────────
+    UserDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+          example: John
+        lastName:
+          type: string
+          example: Doe
+        email:
+          type: string
+          example: john.doe@example.com
+        phone:
+          type: string
+          example: "+5511999999999"
+        active:
+          type: boolean
+          example: true
+        roles:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+          minLength: 2
+          maxLength: 100
+        lastName:
+          type: string
+          minLength: 2
+          maxLength: 100
+        phone:
+          type: string
+          pattern: '^\+?[1-9]\d{1,14}$'
+
+    AddressDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          example: Home
+        street:
+          type: string
+          example: 123 Main Street
+        city:
+          type: string
+          example: São Paulo
+        state:
+          type: string
+          example: SP
+        zipCode:
+          type: string
+          example: "01310-100"
+        country:
+          type: string
+          example: Brazil
+        default:
+          type: boolean
+          example: true
+
+    AddressRequest:
+      type: object
+      required: [label, street, city, state, zipCode]
+      properties:
+        label:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: Home
+        street:
+          type: string
+          minLength: 5
+          maxLength: 255
+          example: 123 Main Street
+        city:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: São Paulo
+        state:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: SP
+        zipCode:
+          type: string
+          minLength: 5
+          maxLength: 20
+          example: "01310-100"
+        country:
+          type: string
+          maxLength: 100
+          default: Brazil
+        default:
+          type: boolean
+          default: false
+
+    # ── Category ───────────────────────────────
+    CategoryDTO:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Fiction
+        slug:
+          type: string
+          example: fiction
+        description:
+          type: string
+          example: Fictional literature
+        parentId:
+          type: integer
+          nullable: true
+          example: null
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryDTO'
+
+    CategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: Fiction
+        description:
+          type: string
+          maxLength: 500
+        parentId:
+          type: integer
+          nullable: true
+
+    # ── Brand / Publisher ──────────────────────
+    BrandDTO:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Penguin Books
+        description:
+          type: string
+          example: A leading publisher of literary fiction
+        logoUrl:
+          type: string
+          format: uri
+          example: https://cdn.ebookstore.com/brands/penguin.png
+
+    BrandRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: Penguin Books
+        description:
+          type: string
+          maxLength: 500
+        logoUrl:
+          type: string
+          format: uri
+
+    # ── Book ───────────────────────────────────
+    BookSummaryDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: "The Great Gatsby"
+        author:
+          type: string
+          example: F. Scott Fitzgerald
+        isbn:
+          type: string
+          example: "978-0-7432-7356-5"
+        price:
+          type: number
+          format: decimal
+          example: 29.99
+        discountPrice:
+          type: number
+          format: decimal
+          example: 24.99
+        avgRating:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 5
+          example: 4.3
+        primaryImageUrl:
+          type: string
+          format: uri
+        categoryName:
+          type: string
+          example: Fiction
+        brandName:
+          type: string
+          example: Scribner
+        inStock:
+          type: boolean
+          example: true
+
+    BookDetailDTO:
+      allOf:
+        - $ref: '#/components/schemas/BookSummaryDTO'
+        - type: object
+          properties:
+            description:
+              type: string
+              example: "A novel set in the Jazz Age..."
+            stockQuantity:
+              type: integer
+              example: 42
+            images:
+              type: array
+              items:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                  primary:
+                    type: boolean
+            relatedBooks:
+              type: array
+              items:
+                $ref: '#/components/schemas/BookSummaryDTO'
+            reviews:
+              $ref: '#/components/schemas/PagedReviewDTO'
+
+    BookRequest:
+      type: object
+      required: [title, isbn, author, categoryId, brandId, price, stockQuantity]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 300
+          example: "The Great Gatsby"
+        isbn:
+          type: string
+          pattern: '^(97(8|9))?\d{9}(\d|X)$'
+          example: "9780743273565"
+        author:
+          type: string
+          minLength: 2
+          maxLength: 255
+          example: F. Scott Fitzgerald
+        categoryId:
+          type: integer
+          example: 1
+        brandId:
+          type: integer
+          example: 1
+        price:
+          type: number
+          format: decimal
+          minimum: 0.01
+          example: 29.99
+        discountPrice:
+          type: number
+          format: decimal
+          minimum: 0.00
+          nullable: true
+          example: 24.99
+        stockQuantity:
+          type: integer
+          minimum: 0
+          example: 100
+        description:
+          type: string
+          maxLength: 5000
+
+    PagedBookDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookSummaryDTO'
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 20
+        totalElements:
+          type: integer
+          example: 150
+        totalPages:
+          type: integer
+          example: 8
+        last:
+          type: boolean
+          example: false
+
+    # ── Review ─────────────────────────────────
+    ReviewDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        bookId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        userFullName:
+          type: string
+          example: John Doe
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 4
+        comment:
+          type: string
+          example: "Great read, highly recommended!"
+        createdAt:
+          type: string
+          format: date-time
+
+    ReviewRequest:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 4
+        comment:
+          type: string
+          maxLength: 1000
+          example: "Great read!"
+
+    PagedReviewDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewDTO'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+
+    # ── Cart ───────────────────────────────────
+    CartDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartItemDTO'
+        subtotal:
+          type: number
+          format: decimal
+          example: 74.97
+        itemCount:
+          type: integer
+          example: 3
+        updatedAt:
+          type: string
+          format: date-time
+
+    CartItemDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        bookId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: "The Great Gatsby"
+        author:
+          type: string
+          example: F. Scott Fitzgerald
+        imageUrl:
+          type: string
+          format: uri
+        unitPrice:
+          type: number
+          format: decimal
+          example: 24.99
+        quantity:
+          type: integer
+          example: 2
+        lineTotal:
+          type: number
+          format: decimal
+          example: 49.98
+        inStock:
+          type: boolean
+          example: true
+
+    AddToCartRequest:
+      type: object
+      required: [bookId, quantity]
+      properties:
+        bookId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 99
+          example: 2
+
+    UpdateCartItemRequest:
+      type: object
+      required: [quantity]
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 99
+          example: 3
+
+    # ── Order ──────────────────────────────────
+    PlaceOrderRequest:
+      type: object
+      required: [addressId, paymentMethod]
+      properties:
+        addressId:
+          type: string
+          format: uuid
+          description: Delivery address ID
+        paymentMethod:
+          type: string
+          enum: [CREDIT_CARD, DEBIT_CARD, PIX, BOLETO, REWARD_POINTS]
+          example: CREDIT_CARD
+        rewardPointsToRedeem:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 500
+          description: Number of reward points to apply as discount
+        couponCode:
+          type: string
+          example: SAVE10
+          description: Optional promotional coupon code
+
+    OrderDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED, REFUNDED]
+          example: CONFIRMED
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemDTO'
+        deliveryAddress:
+          $ref: '#/components/schemas/AddressDTO'
+        subtotal:
+          type: number
+          format: decimal
+          example: 74.97
+        discountAmount:
+          type: number
+          format: decimal
+          example: 5.00
+        rewardPointsUsed:
+          type: integer
+          example: 500
+        totalAmount:
+          type: number
+          format: decimal
+          example: 69.97
+        payment:
+          $ref: '#/components/schemas/PaymentDTO'
+        orderedAt:
+          type: string
+          format: date-time
+        canCancel:
+          type: boolean
+          description: True if order is within 48-hour cancellation window
+          example: true
+
+    OrderItemDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        bookId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: "The Great Gatsby"
+        author:
+          type: string
+          example: F. Scott Fitzgerald
+        imageUrl:
+          type: string
+          format: uri
+        quantity:
+          type: integer
+          example: 2
+        unitPrice:
+          type: number
+          format: decimal
+          example: 24.99
+        lineTotal:
+          type: number
+          format: decimal
+          example: 49.98
+
+    OrderConfirmationDTO:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        orderNumber:
+          type: string
+          example: "ORD-20240115-00042"
+        status:
+          type: string
+          example: CONFIRMED
+        totalAmount:
+          type: number
+          format: decimal
+          example: 69.97
+        rewardPointsEarned:
+          type: integer
+          example: 70
+        estimatedDelivery:
+          type: string
+          format: date
+          example: "2024-01-20"
+        message:
+          type: string
+          example: "Order placed successfully! Your books are on their way."
+
+    CancellationDTO:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: CANCELLED
+        refundAmount:
+          type: number
+          format: decimal
+          example: 69.97
+        rewardPointsReversed:
+          type: integer
+          example: 500
+        message:
+          type: string
+          example: "Order cancelled and refund initiated."
+
+    PagedOrderDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderDTO'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+
+    # ── Payment ────────────────────────────────
+    PaymentDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        method:
+          type: string
+          enum: [CREDIT_CARD, DEBIT_CARD, PIX, BOLETO, REWARD_POINTS]
+          example: CREDIT_CARD
+        status:
+          type: string
+          enum: [PENDING, PROCESSING, SUCCESS, FAILED, REFUNDED]
+          example: SUCCESS
+        amount:
+          type: number
+          format: decimal
+          example: 69.97
+        transactionRef:
+          type: string
+          example: TXN-20240115-ABC123
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    PaymentRequest:
+      type: object
+      required: [orderId, method]
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        method:
+          type: string
+          enum: [CREDIT_CARD, DEBIT_CARD, PIX, BOLETO, REWARD_POINTS]
+        cardToken:
+          type: string
+          description: Tokenized card reference (required for CREDIT_CARD / DEBIT_CARD)
+          example: tok_visa_test_xxxx
+
+    PaymentConfirmationRequest:
+      type: object
+      required: [transactionRef]
+      properties:
+        transactionRef:
+          type: string
+          description: Transaction reference returned by the payment gateway
+          example: TXN-20240115-ABC123
+
+    # ── Reward Points ──────────────────────────
+    RewardBalanceDTO:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        totalPoints:
+          type: integer
+          example: 1250
+        pointsValue:
+          type: number
+          format: decimal
+          example: 12.50
+          description: Monetary value of current points (1 point = R$0.01)
+        expiringPoints:
+          type: integer
+          example: 200
+          description: Points expiring within 30 days
+
+    RewardTransactionDTO:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [EARN, REDEEM, EXPIRE, REVERSE]
+          example: EARN
+        points:
+          type: integer
+          example: 70
+        description:
+          type: string
+          example: "Points earned on order ORD-20240115-00042"
+        orderId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    PagedRewardTransactionDTO:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/RewardTransactionDTO'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+
+    # ── Recommendation ─────────────────────────
+    RecommendationDTO:
+      type: object
+      properties:
+        book:
+          $ref: '#/components/schemas/BookSummaryDTO'
+        reason:
+          type: string
+          enum: [PURCHASED_SIMILAR, SAME_AUTHOR, SAME_CATEGORY, TRENDING, HIGHLY_RATED]
+          example: PURCHASED_SIMILAR
+        score:
+          type: number
+          format: float
+          description: Relevance score (0–1)
+          example: 0.92
+
+    RecommendationListDTO:
+      type: object
+      properties:
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendationDTO'
+        generatedAt:
+          type: string
+          format: date-time
+
+# ─────────────────────────────────────────────
+# Global Security (override per-endpoint where needed)
+# ─────────────────────────────────────────────
+security:
+  - BearerAuth: []
+
+# ─────────────────────────────────────────────
+# Tags
+# ─────────────────────────────────────────────
+tags:
+  - name: Authentication
+    description: Register, login, token refresh and logout
+  - name: Users
+    description: User profile management
+  - name: Addresses
+    description: Delivery address management
+  - name: Categories
+    description: Book category hierarchy
+  - name: Brands
+    description: Publishers and brands
+  - name: Books
+    description: Book catalog, search, and reviews
+  - name: Cart
+    description: Shopping cart management
+  - name: Orders
+    description: Order placement, history, cancellation, and buy-again
+  - name: Payments
+    description: Payment initiation and confirmation
+  - name: Rewards
+    description: Reward points balance and history
+  - name: Recommendations
+    description: Personalized and trending book recommendations
+
+# ─────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────
+paths:
+
+  # ════════════════════════════════════════════
+  # AUTH
+  # ════════════════════════════════════════════
+  /v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      description: Creates a new ROLE_CUSTOMER account and returns JWT access + refresh tokens.
+      security: []
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        "201":
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "500":
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate user
+      description: Returns JWT access and refresh tokens on valid credentials.
+      security: []
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      description: Issues a new access token using a valid refresh token. Token rotation is applied — the old refresh token is revoked.
+      security: []
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        "200":
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Logout user
+      description: Revokes all active refresh tokens for the authenticated user.
+      operationId: logoutUser
+      responses:
+        "204":
+          description: Logged out successfully
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  # ════════════════════════════════════════════
+  # USERS
+  # ════════════════════════════════════════════
+  /v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get current user profile
+      operationId: getCurrentUser
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [Users]
+      summary: Update current user profile
+      operationId: updateCurrentUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        "200":
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  # ════════════════════════════════════════════
+  # ADDRESSES
+  # ════════════════════════════════════════════
+  /v1/users/me/addresses:
+    get:
+      tags: [Addresses]
+      summary: List user delivery addresses
+      operationId: listAddresses
+      responses:
+        "200":
+          description: List of addresses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AddressDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Addresses]
+      summary: Add a new delivery address
+      operationId: addAddress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddressRequest'
+      responses:
+        "201":
+          description: Address created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/users/me/addresses/{addressId}:
+    parameters:
+      - $ref: '#/components/parameters/AddressIdParam'
+    put:
+      tags: [Addresses]
+      summary: Update an address
+      operationId: updateAddress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddressRequest'
+      responses:
+        "200":
+          description: Address updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Addresses]
+      summary: Delete an address
+      operationId: deleteAddress
+      responses:
+        "204":
+          description: Address deleted
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /v1/users/me/addresses/{addressId}/default:
+    parameters:
+      - $ref: '#/components/parameters/AddressIdParam'
+    patch:
+      tags: [Addresses]
+      summary: Set address as default
+      operationId: setDefaultAddress
+      responses:
+        "200":
+          description: Default address updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddressDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ════════════════════════════════════════════
+  # CATEGORIES
+  # ════════════════════════════════════════════
+  /v1/categories:
+    get:
+      tags: [Categories]
+      summary: List all categories
+      description: Returns top-level categories with their children (tree structure).
+      security: []
+      operationId: listCategories
+      responses:
+        "200":
+          description: Category tree
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CategoryDTO'
+    post:
+      tags: [Categories]
+      summary: Create a category (Admin only)
+      operationId: createCategory
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryRequest'
+      responses:
+        "201":
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/categories/{categoryId}:
+    parameters:
+      - $ref: '#/components/parameters/CategoryIdParam'
+    get:
+      tags: [Categories]
+      summary: Get category by ID
+      security: []
+      operationId: getCategoryById
+      responses:
+        "200":
+          description: Category details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryDTO'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Categories]
+      summary: Update a category (Admin only)
+      operationId: updateCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryRequest'
+      responses:
+        "200":
+          description: Category updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Categories]
+      summary: Delete a category (Admin only)
+      operationId: deleteCategory
+      responses:
+        "204":
+          description: Category deleted
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /v1/categories/{categoryId}/books:
+    parameters:
+      - $ref: '#/components/parameters/CategoryIdParam'
+    get:
+      tags: [Categories]
+      summary: Browse books by category
+      security: []
+      operationId: getBooksByCategory
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/SortParam'
+      responses:
+        "200":
+          description: Paginated books in category
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedBookDTO'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ════════════════════════════════════════════
+  # BRANDS / PUBLISHERS
+  # ════════════════════════════════════════════
+  /v1/brands:
+    get:
+      tags: [Brands]
+      summary: List all brands/publishers
+      security: []
+      operationId: listBrands
+      responses:
+        "200":
+          description: List of brands
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BrandDTO'
+    post:
+      tags: [Brands]
+      summary: Create a brand (Admin only)
+      operationId: createBrand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrandRequest'
+      responses:
+        "201":
+          description: Brand created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/brands/{brandId}:
+    parameters:
+      - $ref: '#/components/parameters/BrandIdParam'
+    get:
+      tags: [Brands]
+      summary: Get brand by ID
+      security: []
+      operationId: getBrandById
+      responses:
+        "200":
+          description: Brand details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandDTO'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Brands]
+      summary: Update a brand (Admin only)
+      operationId: updateBrand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrandRequest'
+      responses:
+        "200":
+          description: Brand updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Brands]
+      summary: Delete a brand (Admin only)
+      operationId: deleteBrand
+      responses:
+        "204":
+          description: Brand deleted
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /v1/brands/{brandId}/books:
+    parameters:
+      - $ref: '#/components/parameters/BrandIdParam'
+    get:
+      tags: [Brands]
+      summary: Browse books by brand/publisher
+      security: []
+      operationId: getBooksByBrand
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/SortParam'
+      responses:
+        "200":
+          description: Paginated books by brand
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedBookDTO'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ════════════════════════════════════════════
+  # BOOKS
+  # ════════════════════════════════════════════
+  /v1/books:
+    get:
+      tags: [Books]
+      summary: List books (paginated, filterable)
+      security: []
+      operationId: listBooks
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/SortParam'
+        - name: categoryId
+          in: query
+          schema:
+            type: integer
+        - name: brandId
+          in: query
+          schema:
+            type: integer
+        - name: minPrice
+          in: query
+          schema:
+            type: number
+            format: decimal
+            minimum: 0
+        - name: maxPrice
+          in: query
+          schema:
+            type: number
+            format: decimal
+        - name: inStock
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Paginated book list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedBookDTO'
+    post:
+      tags: [Books]
+      summary: Create a book (Admin only)
+      operationId: createBook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookRequest'
+      responses:
+        "201":
+          description: Book created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookDetailDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /v1/books/search:
+    get:
+      tags: [Books]
+      summary: Search books by title, author, or ISBN
+      security: []
+      operationId: searchBooks
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query — matches title, author, or ISBN
+          schema:
+            type: string
+            minLength: 2
+            example: fitzgerald
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedBookDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+
+  /v1/books/{bookId}:
+    parameters:
+      - $ref: '#/components/parameters/BookIdParam'
+    get:
+      tags: [Books]
+      summary: Get book details
+      description: Returns full book details including images, related books, and latest reviews.
+      security: []
+      operationId: getBookById
+      responses:
+        "200":
+          description: Book details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookDetailDTO'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Books]
+      summary: Update a book (Admin only)
+      operationId: updateBook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookRequest'
+      responses:
+        "200":
+          description: Book updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookDetailDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Books]
+      summary: Deactivate a book (Admin only)
+      description: Soft deletes the book by setting is_active = false.
+      operationId: deleteBook
+      responses:
+        "204":
+          description: Book deactivated
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /v1/books/{bookId}/related:
+    parameters:
+      - $ref: '#/components/parameters/BookIdParam'
+    get:
+      tags: [Books]
+      summary: Get related books
+      security: []
+      operationId: getRelatedBooks
+      responses:
+        "200":
+          description: Related books
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BookSummaryDTO'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /v1/books/{bookId}/reviews:
+    parameters:
+      - $ref: '#/components/parameters/BookIdParam'
+    get:
+      tags: [Books]
+      summary: Get reviews for a book
+      security: []
+      operationId: getBookReviews
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        "200":
+          description: Paginated reviews
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedReviewDTO'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Books]
+      summary: Submit a review for a book
+      description: A user can review a book only once, and only if they have purchased it.
+      operationId: createReview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+      responses:
+        "201":
+          description: Review created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "409":
+          $ref: '#/components/responses/Conflict'
+        "422":
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  # ════════════════════════════════════════════
+  # CART
+  # ════════════════════════════════════════════
+  /v1/cart:
+    get:
+      tags: [Cart]
+      summary: View current cart
+      operationId: getCart
+      responses:
+        "200":
+          description: Current cart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Cart]
+      summary: Clear entire cart
+      operationId: clearCart
+      responses:
+        "204":
+          description: Cart cleared
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/cart/items:
+    post:
+      tags: [Cart]
+      summary: Add item to cart
+      description: If the book is already in the cart, quantity is incremented. Stock is validated.
+      operationId: addToCart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddToCartRequest'
+      responses:
+        "200":
+          description: Cart updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          description: Insufficient stock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/cart/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/CartItemIdParam'
+    put:
+      tags: [Cart]
+      summary: Update cart item quantity
+      operationId: updateCartItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCartItemRequest'
+      responses:
+        "200":
+          description: Cart item updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Cart]
+      summary: Remove item from cart
+      operationId: removeCartItem
+      responses:
+        "200":
+          description: Item removed — returns updated cart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ════════════════════════════════════════════
+  # ORDERS
+  # ════════════════════════════════════════════
+  /v1/orders:
+    post:
+      tags: [Orders]
+      summary: Place order (checkout)
+      description: |
+        Creates an order from the current cart. Validates stock, applies reward points discount,
+        clears the cart, and initiates payment processing.
+      operationId: placeOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceOrderRequest'
+      responses:
+        "201":
+          description: Order placed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderConfirmationDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          description: Business rule violation (empty cart, insufficient stock, insufficient reward points)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: [Orders]
+      summary: Get order history
+      operationId: getOrderHistory
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - name: status
+          in: query
+          description: Filter by order status
+          schema:
+            type: string
+            enum: [PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED, REFUNDED]
+      responses:
+        "200":
+          description: Paginated order history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedOrderDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderIdParam'
+    get:
+      tags: [Orders]
+      summary: Get order details
+      operationId: getOrderById
+      responses:
+        "200":
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /v1/orders/{orderId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/OrderIdParam'
+    post:
+      tags: [Orders]
+      summary: Cancel an order
+      description: |
+        Cancels an order only within **48 hours** of placement.
+        Initiates a refund and reverses any redeemed reward points.
+        Stock is restored automatically.
+      operationId: cancelOrder
+      responses:
+        "200":
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancellationDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          description: Order cannot be cancelled (outside 48h window or invalid status)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/orders/{orderId}/buy-again:
+    parameters:
+      - $ref: '#/components/parameters/OrderIdParam'
+    post:
+      tags: [Orders]
+      summary: Buy again (re-add order items to cart)
+      description: Re-adds all items from a past order to the current cart. Items out of stock are skipped and reported.
+      operationId: buyAgain
+      responses:
+        "200":
+          description: Items added to cart
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cart:
+                    $ref: '#/components/schemas/CartDTO'
+                  skippedItems:
+                    type: array
+                    description: Items not added due to being out of stock
+                    items:
+                      type: object
+                      properties:
+                        bookId:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                        reason:
+                          type: string
+                          example: Out of stock
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ════════════════════════════════════════════
+  # PAYMENTS
+  # ════════════════════════════════════════════
+  /v1/payments:
+    post:
+      tags: [Payments]
+      summary: Initiate payment
+      description: Initiates payment processing for a PENDING order.
+      operationId: initiatePayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        "201":
+          description: Payment initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /v1/payments/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderIdParam'
+    get:
+      tags: [Payments]
+      summary: Get payment status for an order
+      operationId: getPaymentByOrderId
+      responses:
+        "200":
+          description: Payment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /v1/payments/{orderId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/OrderIdParam'
+    post:
+      tags: [Payments]
+      summary: Confirm payment
+      description: |
+        Confirms payment using the transaction reference returned by the payment gateway.
+        On success: marks order as CONFIRMED, credits reward points, and sends confirmation notification.
+      operationId: confirmPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentConfirmationRequest'
+      responses:
+        "200":
+          description: Payment confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentDTO'
+        "400":
+          $ref: '#/components/responses/ValidationError'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "422":
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  # ════════════════════════════════════════════
+  # REWARDS
+  # ════════════════════════════════════════════
+  /v1/rewards/balance:
+    get:
+      tags: [Rewards]
+      summary: Get reward points balance
+      operationId: getRewardBalance
+      responses:
+        "200":
+          description: Reward points balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RewardBalanceDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/rewards/history:
+    get:
+      tags: [Rewards]
+      summary: Get reward points transaction history
+      operationId: getRewardHistory
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - name: type
+          in: query
+          description: Filter by transaction type
+          schema:
+            type: string
+            enum: [EARN, REDEEM, EXPIRE, REVERSE]
+      responses:
+        "200":
+          description: Paginated reward transaction history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedRewardTransactionDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  # ════════════════════════════════════════════
+  # RECOMMENDATIONS
+  # ════════════════════════════════════════════
+  /v1/recommendations:
+    get:
+      tags: [Recommendations]
+      summary: Get personalized recommendations
+      description: Returns book recommendations based on the user's purchase history and preferences.
+      operationId: getPersonalizedRecommendations
+      parameters:
+        - name: limit
+          in: query
+          description: Max number of recommendations to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: Personalized recommendations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationListDTO'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/recommendations/trending:
+    get:
+      tags: [Recommendations]
+      summary: Get trending books
+      description: Returns trending books based on recent sales and views. No authentication required.
+      security: []
+      operationId: getTrendingBooks
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+        - name: categoryId
+          in: query
+          description: Filter trending books by category
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Trending books
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationListDTO'
